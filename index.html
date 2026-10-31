@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#0a0e17">
+  <title>STM32 小车 · 轮盘遥控</title>
+  <style>
+    :root{
+      --bg:#0a0e17;
+      --panel:#121a2b;
+      --accent:#3ddc97;
+      --accent2:#4cc9f0;
+      --warn:#ff6b6b;
+      --text:#e8eefc;
+      --muted:#8a97b3;
+    }
+    *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+    html,body{margin:0;padding:0;height:100%;}
+    body{
+      background:radial-gradient(1200px 600px at 50% -10%, #16233b 0%, var(--bg) 60%);
+      color:var(--text);
+      font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,"PingFang SC","Microsoft YaHei",sans-serif;
+      display:flex;flex-direction:column;align-items:center;
+      min-height:100dvh;
+      padding:14px 14px calc(18px + env(safe-area-inset-bottom));
+      user-select:none;
+      overflow:hidden;
+    }
+    header{
+      width:100%;max-width:520px;display:flex;align-items:center;
+      justify-content:space-between;gap:10px;margin-bottom:10px;
+    }
+    .title{font-size:18px;font-weight:700;letter-spacing:.5px;line-height:1.2;}
+    .title small{display:block;font-size:11px;color:var(--muted);font-weight:400;letter-spacing:0;margin-top:2px;}
+    .pill{
+      display:flex;align-items:center;gap:6px;font-size:12px;padding:6px 12px;
+      border-radius:999px;background:var(--panel);border:1px solid #22314d;
+      color:var(--muted);white-space:nowrap;
+    }
+    .dot{width:8px;height:8px;border-radius:50%;background:#5b6b8c;box-shadow:0 0 0 3px rgba(91,107,140,.18);}
+    .dot.on{background:var(--accent);box-shadow:0 0 0 3px rgba(61,220,151,.2),0 0 12px var(--accent);}
+    .dot.err{background:var(--warn);box-shadow:0 0 0 3px rgba(255,107,107,.2);}
+
+    .stage{
+      width:100%;max-width:520px;flex:1;display:flex;flex-direction:column;
+      align-items:center;justify-content:center;gap:16px;
+    }
+
+    #base{
+      position:relative;
+      width:min(80vw,340px);aspect-ratio:1/1;border-radius:50%;
+      background:
+        radial-gradient(circle at 50% 42%, rgba(76,201,240,.14), rgba(10,14,23,0) 62%),
+        radial-gradient(circle at 50% 50%, #1a2740 0%, #0e1626 70%, #0a111d 100%);
+      border:1px solid #24355a;
+      box-shadow:inset 0 0 30px rgba(0,0,0,.55),0 14px 40px rgba(0,0,0,.5);
+      touch-action:none;
+      transition:box-shadow .2s;
+      cursor:grab;
+    }
+    #base.active{
+      box-shadow:inset 0 0 30px rgba(0,0,0,.55),0 14px 40px rgba(0,0,0,.5),0 0 0 2px rgba(61,220,151,.45);
+    }
+    #base::before{
+      content:"";position:absolute;inset:12%;border-radius:50%;
+      border:1px dashed rgba(76,201,240,.18);
+    }
+    #base::after{
+      content:"";position:absolute;inset:0;border-radius:50%;
+      background:
+        linear-gradient(rgba(76,201,240,.12),rgba(76,201,240,.12)) 50% 50%/1px 26% no-repeat,
+        linear-gradient(rgba(76,201,240,.12),rgba(76,201,240,.12)) 50% 50%/26% 1px no-repeat;
+      pointer-events:none;
+    }
+    #knob{
+      position:absolute;left:50%;top:50%;
+      width:30%;aspect-ratio:1/1;border-radius:50%;
+      margin-left:-15%;margin-top:-15%;
+      background:radial-gradient(circle at 38% 32%, #7ff0c0, #22b87a 55%, #0f7a52 100%);
+      box-shadow:0 8px 22px rgba(34,184,122,.45),inset 0 2px 6px rgba(255,255,255,.35);
+      transform:translate(0,0);
+      transition:transform .06s linear;
+      pointer-events:none;
+    }
+
+    .readout{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;}
+    .chip{
+      background:var(--panel);border:1px solid #22314d;border-radius:12px;
+      padding:8px 12px;font-size:12px;color:var(--muted);min-width:80px;text-align:center;
+    }
+    .chip b{
+      display:block;font-size:16px;color:var(--text);
+      font-variant-numeric:tabular-nums;margin-top:2px;
+    }
+
+    .actions{display:flex;gap:10px;width:100%;max-width:520px;}
+    button{
+      flex:1;border:0;border-radius:14px;padding:14px 10px;font-size:15px;font-weight:700;
+      color:#06121e;cursor:pointer;transition:transform .06s,filter .2s;
+      font-family:inherit;
+    }
+    button:active{transform:scale(.97);}
+    button:disabled{filter:grayscale(.6);opacity:.5;}
+    .btn-connect{background:linear-gradient(135deg,#5ff0b8,#22b87a);box-shadow:0 8px 20px rgba(34,184,122,.28);}
+    .btn-disconnect{background:linear-gradient(135deg,#ffd27a,#ff9f43);color:#2a1500;box-shadow:0 8px 20px rgba(255,159,67,.25);}
+    .btn-stop{background:linear-gradient(135deg,#ff8a8a,#ff5a5a);color:#2a0505;box-shadow:0 8px 20px rgba(255,90,90,.28);flex:0 0 34%;}
+
+    .tip{
+      font-size:11px;color:var(--muted);text-align:center;max-width:460px;
+      line-height:1.6;
+    }
+    .tip b{color:var(--accent2);}
+
+    .toast{
+      position:fixed;left:50%;bottom:calc(90px + env(safe-area-inset-bottom));
+      transform:translate(-50%,20px);opacity:0;pointer-events:none;
+      background:#1c2a44;border:1px solid #2f4670;color:var(--text);
+      padding:10px 16px;border-radius:12px;font-size:13px;max-width:82vw;text-align:center;
+      transition:opacity .25s,transform .25s;z-index:50;
+    }
+    .toast.show{opacity:1;transform:translate(-50%,0);}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="title">STM32 小车<small>轮盘摇杆 · Web Bluetooth</small></div>
+    <div class="pill"><span class="dot" id="statusDot"></span><span id="statusText">未连接</span></div>
+  </header>
+
+  <div class="stage">
+    <div id="base" aria-label="摇杆">
+      <div id="knob"></div>
+    </div>
+
+    <div class="readout">
+      <div class="chip">X 横向<b id="vx">0</b></div>
+      <div class="chip">Y 纵向<b id="vy">0</b></div>
+      <div class="chip">左轮<b id="vl">0</b></div>
+      <div class="chip">右轮<b id="vr">0</b></div>
+    </div>
+
+    <div class="actions">
+      <button class="btn-connect" id="btnConnect">连接蓝牙</button>
+      <button class="btn-disconnect" id="btnDisconnect" disabled>断开</button>
+      <button class="btn-stop" id="btnStop">急停</button>
+    </div>
+
+    <div class="tip">
+      安卓 <b>Chrome</b> 打开 → 点「连接蓝牙」选你的 BLE 模块 → 拖动轮盘控制小车<br>
+      松手自动停车；网站必须走 <b>HTTPS</b>（GitHub Pages / Netlify）
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+  (function () {
+    'use strict';
+
+    /* ============================================================
+     * 一、常量
+     * ============================================================
+     * SEND_INTERVAL_MS：发送间隔。50ms = 每秒 20 次（20Hz）。
+     *   摇杆需要"连续"控制，所以按固定频率不断发当前坐标。
+     *   9600 波特率下，20Hz × 约 6 字节/帧 = 120 字节/秒，
+     *   远低于 9600 波特率的上限（约 960 字节/秒），不会堵。
+     */
+    var SEND_INTERVAL_MS = 50;
+
+    /* BLE 模块的"透明传输"服务 UUID。
+     * JDY-31 / HC-08 / HM-10 这类模块大多用 FFE0 服务 + FFE1 特征值。
+     * 这里列几个常见变种，连接后会自动挨个尝试。 */
+    var BLE_SERVICES = [
+      '0000ffe0-0000-1000-8000-00805f9b34fb', // FFE0（最常见）
+      '0000ff00-0000-1000-8000-00805f9b34fb', // FF00
+      '0000ffe5-0000-1000-8000-00805f9b34fb', // FFE5
+      '6e400001-b5a3-f393-e0a9-e50e24dcca9e'  // Nordic UART
+    ];
+
+    /* ============================================================
+     * 二、DOM 元素
+     * ============================================================ */
+    var base        = document.getElementById('base');
+    var knob        = document.getElementById('knob');
+    var statusDot   = document.getElementById('statusDot');
+    var statusText  = document.getElementById('statusText');
+    var vxEl        = document.getElementById('vx');
+    var vyEl        = document.getElementById('vy');
+    var vlEl        = document.getElementById('vl');
+    var vrEl        = document.getElementById('vr');
+    var btnConnect  = document.getElementById('btnConnect');
+    var btnDisconnect = document.getElementById('btnDisconnect');
+    var btnStop     = document.getElementById('btnStop');
+    var toastEl     = document.getElementById('toast');
+
+    /* ============================================================
+     * 三、运行状态
+     * ============================================================ */
+    var device      = null;   // BluetoothDevice
+    var server      = null;   // GATT Server
+    var writeChar   = null;   // 可写特征值（发数据用）
+    var connected   = false;
+    var sendTimer   = null;
+    var stickX      = 0;      // 横向 -100~100（右为正）
+    var stickY      = 0;      // 纵向 -100~100（前为正）
+    var activePointer = null; // 当前按在摇杆上的手指 id
+    var encoder     = new TextEncoder(); // 字符串 -> UTF-8 字节
+    var toastTimer  = null;
+
+    /* ============================================================
+     * 四、小工具
+     * ============================================================ */
+    function clamp(v, lo, hi) {
+      return v < lo ? lo : (v > hi ? hi : v);
+    }
+
+    function showToast(msg) {
+      toastEl.textContent = msg;
+      toastEl.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(function () {
+        toastEl.classList.remove('show');
+      }, 2200);
+    }
+
+    function setStatus(text, cls) {
+      statusText.textContent = text;
+      statusDot.className = 'dot' + (cls ? ' ' + cls : '');
+    }
+
+    /* ============================================================
+     * 五、摇杆逻辑
+     * ============================================================ */
+
+    /* 摇杆中心到"手柄可移动最大距离"（像素） */
+    function knobMax() {
+      var r = base.clientWidth / 2 - knob.clientWidth / 2 - 6;
+      return Math.max(r, 10);
+    }
+
+    /* 根据"相对中心的位移"更新手柄位置和 x/y 值 */
+    function setStick(dx, dy) {
+      var max = knobMax();
+      var dist = Math.sqrt(dx * dx + dy * dy);
+
+      /* 超出圆盘范围就"贴边"（限幅到半径内） */
+      if (dist > max) {
+        dx = dx / dist * max;
+        dy = dy / dist * max;
+      }
+
+      knob.style.transform = 'translate(' + dx + 'px,' + dy + 'px)';
+
+      /* 换算成 -100~100：
+       *   x：向右为正
+       *   y：屏幕坐标向下为正，所以取反，让"向上"为正 */
+      stickX = Math.round(dx / max * 100);
+      stickY = Math.round(-dy / max * 100);
+
+      updateReadout();
+    }
+
+    /* 把当前 x/y 换算成左右轮速度（和 STM32 端同算法，仅用于显示） */
+    function updateReadout() {
+      var left  = clamp(stickY + stickX, -100, 100);
+      var right = clamp(stickY - stickX, -100, 100);
+      vxEl.textContent = stickX;
+      vyEl.textContent = stickY;
+      vlEl.textContent = left;
+      vrEl.textContent = right;
+    }
+
+    /* 手指/鼠标坐标 -> 相对摇杆中心的位移 */
+    function pointerDelta(e) {
+      var rect = base.getBoundingClientRect();
+      return {
+        dx: e.clientX - (rect.left + rect.width / 2),
+        dy: e.clientY - (rect.top + rect.height / 2)
+      };
+    }
+
+    function onPointerDown(e) {
+      e.preventDefault();
+      base.classList.add('active');
+      base.setPointerCapture(e.pointerId);  // 手指移出圆盘也能继续跟
+      activePointer = e.pointerId;
+      var p = pointerDelta(e);
+      setStick(p.dx, p.dy);
+    }
+
+    function onPointerMove(e) {
+      if (activePointer !== e.pointerId) return;
+      e.preventDefault();
+      var p = pointerDelta(e);
+      setStick(p.dx, p.dy);
+    }
+
+    function onPointerUp(e) {
+      if (activePointer !== e.pointerId) return;
+      activePointer = null;
+      base.classList.remove('active');
+      setStick(0, 0);        // 手柄回中
+      send('0,0\n');         // 立刻发一帧"停止"
+    }
+
+    /* ============================================================
+     * 六、蓝牙（Web Bluetooth）
+     * ============================================================ */
+
+    /* 在当前 GATT Server 里找一个"可写"的特征值 */
+    async function findWritable(svr) {
+      var i, j, svc, chars, ch;
+
+      /* 先试已知的透明传输服务 */
+      for (i = 0; i < BLE_SERVICES.length; i++) {
+        try {
+          svc = await svr.getPrimaryService(BLE_SERVICES[i]);
+          chars = await svc.getCharacteristics();
+          for (j = 0; j < chars.length; j++) {
+            ch = chars[j];
+            if (ch.properties.write || ch.properties.writeWithoutResponse) {
+              return ch;
+            }
+          }
+        } catch (err) {
+          /* 这个服务不存在，继续试下一个 */
+        }
+      }
+      return null;
+    }
+
+    /* 发送字符串（自动编码成字节） */
+    async function send(text) {
+      if (!writeChar) return;
+      var data = encoder.encode(text);
+      try {
+        if (writeChar.properties.writeWithoutResponse &&
+            typeof writeChar.writeValueWithoutResponse === 'function') {
+          await writeChar.writeValueWithoutResponse(data);
+        } else {
+          await writeChar.writeValue(data);
+        }
+      } catch (err) {
+        console.warn('发送失败', err);
+      }
+    }
+
+    /* 启动"定时发送"循环 */
+    function startSendLoop() {
+      stopSendLoop();
+      sendTimer = setInterval(function () {
+        if (!connected) return;
+        send(stickX + ',' + stickY + '\n');
+      }, SEND_INTERVAL_MS);
+    }
+
+    function stopSendLoop() {
+      if (sendTimer) {
+        clearInterval(sendTimer);
+        sendTimer = null;
+      }
+    }
+
+    /* 连接流程 */
+    async function connect() {
+      if (!navigator.bluetooth) {
+        showToast('此浏览器不支持 Web Bluetooth，请用安卓 Chrome');
+        return;
+      }
+
+      try {
+        setStatus('选择设备…', '');
+
+        /* acceptAllDevices：列出附近所有 BLE 设备，让你自己挑 */
+        device = await navigator.bluetooth.requestDevice({
+          acceptAllDevices: true,
+          optionalServices: BLE_SERVICES
+        });
+
+        device.addEventListener('gattserverdisconnected', onDisconnected);
+
+        setStatus('连接中…', '');
+        server = await device.gatt.connect();
+
+        writeChar = await findWritable(server);
+        if (!writeChar) {
+          throw new Error('没找到可写特征值，模块可能不是 FFE0/FFE1');
+        }
+
+        connected = true;
+        setStatus('已连接', 'on');
+        btnConnect.disabled = true;
+        btnDisconnect.disabled = false;
+
+        startSendLoop();
+        send('0,0\n');  // 连上先发一帧停止，防止残留动作
+
+        showToast('已连接：' + (device.name || 'BLE 设备'));
+      } catch (err) {
+        connected = false;
+        writeChar = null;
+        setStatus('未连接', 'err');
+        showToast('连接失败：' + (err && err.message ? err.message : err));
+      }
+    }
+
+    /* 断开处理（主动断开和意外断开都会走这里） */
+    function onDisconnected() {
+      connected = false;
+      writeChar = null;
+      stopSendLoop();
+      setStatus('已断开', '');
+      btnConnect.disabled = false;
+      btnDisconnect.disabled = true;
+      setStick(0, 0);
+      showToast('蓝牙已断开');
+    }
+
+    async function disconnect() {
+      try {
+        if (device && device.gatt.connected) {
+          await send('0,0\n');   // 断开前先发停止
+          device.gatt.disconnect();
+        }
+      } catch (err) {
+        console.warn(err);
+      }
+      onDisconnected();
+    }
+
+    /* ============================================================
+     * 七、事件绑定
+     * ============================================================ */
+    base.addEventListener('pointerdown', onPointerDown);
+    base.addEventListener('pointermove', onPointerMove);
+    base.addEventListener('pointerup', onPointerUp);
+    base.addEventListener('pointercancel', onPointerUp);
+
+    btnConnect.addEventListener('click', connect);
+    btnDisconnect.addEventListener('click', disconnect);
+
+    btnStop.addEventListener('click', function () {
+      setStick(0, 0);
+      if (connected) send('0,0\n');
+      showToast('已急停');
+    });
+
+    /* 切到后台 / 关页面时，尽量补一帧停止 */
+    document.addEventListener('visibilitychange', function () {
+      if (document.hidden && connected) {
+        setStick(0, 0);
+        send('0,0\n');
+      }
+    });
+
+    window.addEventListener('pagehide', function () {
+      if (connected) send('0,0\n');
+    });
+
+    /* 初始化：手柄回中 */
+    setStick(0, 0);
+  })();
+  </script>
+</body>
+</html>
